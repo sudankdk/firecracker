@@ -9,18 +9,8 @@ import (
 	"strings"
 )
 
-// JobStatus tracks the status of an upload job
-type JobStatus struct {
-	ID         string `json:"id"`
-	Hash       string `json:"hash"`
-	UploadTime string `json:"uploadTime"`
-	DiskPath   string `json:"diskPath"`
-	VMStatus   string `json:"vmStatus"`
-	ScanResult string `json:"scanResult"`
-}
-
-// Simple in-memory job tracker (use database in production)
-var jobs = make(map[string]*JobStatus)
+// JobStatus is an alias for Job (for backwards compatibility)
+type JobStatus = Job
 
 func initDirectories() error {
 	dirs := []string{
@@ -41,6 +31,11 @@ func initDirectories() error {
 		log.Printf("Warning: YARA initialization failed: %v", err)
 	}
 
+	// Initialize database
+	if err := InitDatabase(); err != nil {
+		return fmt.Errorf("failed to initialize database: %w", err)
+	}
+
 	return nil
 }
 
@@ -54,8 +49,8 @@ func jobStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, exists := jobs[jobID]
-	if !exists {
+	job, err := GetJob(jobID)
+	if err != nil {
 		http.Error(w, "Job not found", 404)
 		return
 	}
@@ -80,8 +75,8 @@ func vmScanHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if job exists
-	job, exists := jobs[jobID]
-	if !exists {
+	job, err := GetJob(jobID)
+	if err != nil {
 		http.Error(w, "Job not found", 404)
 		return
 	}
@@ -103,13 +98,12 @@ func vmScanHandler(w http.ResponseWriter, r *http.Request) {
 	// Start VM with input drive attached
 	if err := StartVM(sock, kernel, rootfs, inputDrive); err != nil {
 		http.Error(w, "Failed to start VM: "+err.Error(), 500)
-		job.VMStatus = "failed"
+		UpdateJobStatus(jobID, "failed", job.ScanResult)
 		return
 	}
 
 	// Update job status
-	job.VMStatus = "running"
-	job.ScanResult = "scanning..."
+	UpdateJobStatus(jobID, "running", "scanning...")
 
 	log.Printf("VM started successfully for job %s", jobID)
 
@@ -131,16 +125,22 @@ func main() {
 	http.HandleFunc("/upload", uploadHandler)   // From drives.go
 	http.HandleFunc("/vm/scan/", vmScanHandler) // VM launch endpoint
 	http.HandleFunc("/jobs/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "DELETE" {
+		switch r.Method {
+		case "DELETE":
 			cleanupHandler(w, r)
-		} else if r.Method == "GET" {
+		case "GET":
 			jobStatusHandler(w, r)
-		} else {
+		default:
 			http.Error(w, "Method not allowed", 405)
 		}
 	})
 	http.HandleFunc("/jobs", func(w http.ResponseWriter, r *http.Request) {
 		// List all jobs
+		jobs, err := GetAllJobs()
+		if err != nil {
+			http.Error(w, "Failed to retrieve jobs", 500)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(jobs)
 	})
@@ -189,11 +189,15 @@ func main() {
 				log.Printf("YARA scan error: %v", err)
 			}
 
-			// Update job status
-			if job, exists := jobs[jobID]; exists {
-				job.ScanResult = result.Status
+			// Update job status in database
+			if result != nil {
+				scanStatus := result.Status
 				if result.MatchCount > 0 {
-					job.ScanResult = fmt.Sprintf("%s (%d detections)", result.Status, result.MatchCount)
+					scanStatus = fmt.Sprintf("%s (%d detections)", result.Status, result.MatchCount)
+				}
+				job, _ := GetJob(jobID)
+				if job != nil {
+					UpdateJobStatus(jobID, job.VMStatus, scanStatus)
 				}
 			}
 
@@ -203,6 +207,17 @@ func main() {
 		}
 
 		http.Error(w, "Method not allowed", 405)
+	})
+
+	// Stats endpoint
+	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+		stats, err := GetJobStats()
+		if err != nil {
+			http.Error(w, "Failed to get stats", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(stats)
 	})
 
 	port := "8080"

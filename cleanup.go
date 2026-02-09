@@ -70,9 +70,12 @@ func CleanupJob(jobID string) error {
 		log.Printf("Socket removal (may not exist): %v", err)
 	}
 
-	// 7. Remove job from tracker
-	delete(jobs, jobID)
-	log.Printf("Removed job from tracker: %s", jobID)
+	// 7. Remove job from database
+	if err := DeleteJob(jobID); err != nil {
+		errors = append(errors, fmt.Sprintf("database deletion: %v", err))
+	} else {
+		log.Printf("Removed job from database: %s", jobID)
+	}
 
 	if len(errors) > 0 {
 		return fmt.Errorf("cleanup had errors: %s", strings.Join(errors, "; "))
@@ -99,7 +102,8 @@ func cleanupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if job exists
-	if _, exists := jobs[jobID]; !exists {
+	_, err := GetJob(jobID)
+	if err != nil {
 		http.Error(w, "Job not found", 404)
 		return
 	}

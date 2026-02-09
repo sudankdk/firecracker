@@ -86,7 +86,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		scanStatus = yaraScanResult.Status
 		if yaraScanResult.MatchCount > 0 {
 			scanStatus = fmt.Sprintf("%s (%d detections)", yaraScanResult.Status, yaraScanResult.MatchCount)
-			log.Printf("⚠️  MALWARE DETECTED: %d YARA rules matched", yaraScanResult.MatchCount)
+			log.Printf("⚠️ LAA KHATAM MALWARE DETECTED: %d YARA rules matched", yaraScanResult.MatchCount)
 			for _, det := range yaraScanResult.Detections {
 				log.Printf("   - %s: %s (severity: %s)", det.RuleName, det.Description, det.Severity)
 			}
@@ -95,14 +95,19 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Store job information in global tracker
-	jobs[jobID] = &JobStatus{
+	// Store job information in database
+	job := &Job{
 		ID:         jobID,
 		Hash:       hash,
-		UploadTime: fmt.Sprintf("%d", header.Size), // Store file size temporarily
+		FileName:   header.Filename,
+		FileSize:   header.Size,
 		DiskPath:   diskPath,
 		VMStatus:   "ready",
 		ScanResult: scanStatus,
+	}
+
+	if err := CreateJob(job); err != nil {
+		log.Printf("Warning: Failed to save job to database: %v", err)
 	}
 
 	// Return JSON response with job details
