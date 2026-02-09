@@ -4,7 +4,8 @@ import (
 	"fmt"
 )
 
-func StartVM(sock, kernel, rootfs string) error {
+// StartVM configures and starts a Firecracker VM with optional input drive
+func StartVM(sock, kernel, rootfs, inputDrive string) error {
 	client := NewClient(sock)
 
 	if err := Put(client, "/machine-config", []byte(`{
@@ -28,6 +29,18 @@ func StartVM(sock, kernel, rootfs string) error {
 		"is_read_only": false
 	}`, rootfs))); err != nil {
 		return err
+	}
+
+	// Attach secondary input drive if provided (read-only for security)
+	if inputDrive != "" {
+		if err := Put(client, "/drives/input_drive", []byte(fmt.Sprintf(`{
+			"drive_id": "input_drive",
+			"path_on_host": "%s",
+			"is_root_device": false,
+			"is_read_only": true
+		}`, inputDrive))); err != nil {
+			return fmt.Errorf("failed to attach input drive: %w", err)
+		}
 	}
 
 	return Put(client, "/actions", []byte(`{
