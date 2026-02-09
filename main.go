@@ -36,6 +36,11 @@ func initDirectories() error {
 		log.Printf("Initialized directory: %s", dir)
 	}
 
+	// Initialize YARA environment
+	if err := PrepareYaraEnvironment(); err != nil {
+		log.Printf("Warning: YARA initialization failed: %v", err)
+	}
+
 	return nil
 }
 
@@ -155,6 +160,51 @@ func main() {
 		w.Write([]byte("VM started"))
 	})
 
+	// New scan endpoint
+	http.HandleFunc("/scan/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/scan/")
+		jobID := path
+
+		if jobID == "" {
+			http.Error(w, "Job ID required", 400)
+			return
+		}
+
+		// Get existing results if available
+		if r.Method == "GET" {
+			result, err := GetYaraResults(jobID)
+			if err != nil {
+				http.Error(w, "Scan results not found", 404)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(result)
+			return
+		}
+
+		//POST - trigger new scan
+		if r.Method == "POST" {
+			result, err := ScanFileWithYara(jobID)
+			if err != nil {
+				log.Printf("YARA scan error: %v", err)
+			}
+
+			// Update job status
+			if job, exists := jobs[jobID]; exists {
+				job.ScanResult = result.Status
+				if result.MatchCount > 0 {
+					job.ScanResult = fmt.Sprintf("%s (%d detections)", result.Status, result.MatchCount)
+				}
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(result)
+			return
+		}
+
+		http.Error(w, "Method not allowed", 405)
+	})
+
 	port := "8080"
 	log.Printf("HTTP server listening on port %s...", port)
 	log.Printf("Endpoints:")
@@ -164,6 +214,8 @@ func main() {
 	log.Printf("  GET    /jobs                - List all jobs")
 	log.Printf("  DELETE /jobs/{jobID}        - Cleanup job resources")
 	log.Printf("  POST   /vm/start            - Start VM (legacy)")
+	log.Printf("  POST   /scan/{jobID}          - Run YARA scan on uploaded file")
+	log.Printf("  GET    /scan/{jobID}          - Get YARA scan results")
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)

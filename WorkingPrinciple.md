@@ -50,3 +50,16 @@ Docker: Best suited for microservices, continuous integration/deployment pipelin
 
 Firecracker: Managed through a simple REST API, designed for integration with higher-level orchestration tools.
 Docker: Managed using Docker CLI and API, with extensive support for orchestration tools like Kubernetes.
+
+
+
+# Scanned Yara rules
+Windows executables (PE files)
+Ransomware keywords
+Shell command injection
+Crypto miners
+Keyloggers (critical)
+Credential theft patterns
+Network activity indicators
+Obfuscated JavaScript
+Base64 payloads

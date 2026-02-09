@@ -74,6 +74,27 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	diskPath := disksDir + "/input-" + jobID + ".ext4"
 
+	// Run YARA scan automatically
+	log.Printf("Starting YARA scan for job %s", jobID)
+	yaraScanResult, err := ScanFileWithYara(jobID)
+	if err != nil {
+		log.Printf("YARA scan error (continuing anyway): %v", err)
+	}
+
+	scanStatus := "pending"
+	if yaraScanResult != nil {
+		scanStatus = yaraScanResult.Status
+		if yaraScanResult.MatchCount > 0 {
+			scanStatus = fmt.Sprintf("%s (%d detections)", yaraScanResult.Status, yaraScanResult.MatchCount)
+			log.Printf("⚠️  MALWARE DETECTED: %d YARA rules matched", yaraScanResult.MatchCount)
+			for _, det := range yaraScanResult.Detections {
+				log.Printf("   - %s: %s (severity: %s)", det.RuleName, det.Description, det.Severity)
+			}
+		} else {
+			log.Printf("✓ File is clean (no YARA matches)")
+		}
+	}
+
 	// Store job information in global tracker
 	jobs[jobID] = &JobStatus{
 		ID:         jobID,
@@ -81,7 +102,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		UploadTime: fmt.Sprintf("%d", header.Size), // Store file size temporarily
 		DiskPath:   diskPath,
 		VMStatus:   "ready",
-		ScanResult: "pending",
+		ScanResult: scanStatus,
 	}
 
 	// Return JSON response with job details
@@ -98,14 +119,17 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 func createDiskImage(jobID string) error {
 	diskPath := disksDir + "/input-" + jobID + ".ext4"
 
-	// Allocate 50MB disk file
-	cmd := exec.Command("fallocate", "-l", "50M", diskPath)
+	// Allocate 50MB disk file using dd (WSL2 compatible)
+	// dd is more reliable on Windows-mounted filesystems than fallocate
+	cmd := exec.Command("dd", "if=/dev/zero", "of="+diskPath, "bs=1M", "count=50", "status=none")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to allocate disk: %w", err)
 	}
 
 	// Create ext4 filesystem
 	cmd = exec.Command("mkfs.ext4", "-F", diskPath)
+	cmd.Stdout = nil // Suppress mkfs.ext4 verbose output
+	cmd.Stderr = nil
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to create ext4 filesystem: %w", err)
 	}
