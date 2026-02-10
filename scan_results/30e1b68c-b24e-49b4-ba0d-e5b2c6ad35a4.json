@@ -1,0 +1,16 @@
+{
+  "jobID": "30e1b68c-b24e-49b4-ba0d-e5b2c6ad35a4",
+  "timestamp": "2026-02-10T07:24:29Z",
+  "detections": [
+    {
+      "ruleName": "Potential_Ransomware_Keywords",
+      "tags": [],
+      "description": "YARA rule match",
+      "severity": "medium"
+    }
+  ],
+  "totalRules": 1,
+  "matchCount": 1,
+  "status": "malware_detected",
+  "scanTime": 0.09892935
+}
