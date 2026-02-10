@@ -13,11 +13,10 @@ import (
 )
 
 const (
-	rootDriveName = "root_drive"
-	baseDir       = "/mnt/d/firecracker"
-	uploadsDir    = baseDir + "/uploads"
-	disksDir      = baseDir + "/disks"
-	mountBaseDir  = baseDir + "/mnt"
+	baseDir      = "/mnt/d/firecracker"
+	uploadsDir   = baseDir + "/uploads"
+	disksDir     = baseDir + "/disks"
+	mountBaseDir = baseDir + "/mnt"
 )
 
 type UploadResponse struct {
@@ -86,7 +85,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		scanStatus = yaraScanResult.Status
 		if yaraScanResult.MatchCount > 0 {
 			scanStatus = fmt.Sprintf("%s (%d detections)", yaraScanResult.Status, yaraScanResult.MatchCount)
-			log.Printf("⚠️ LAA KHATAM MALWARE DETECTED: %d YARA rules matched", yaraScanResult.MatchCount)
+			log.Printf(" LAA KHATAM MALWARE DETECTED: %d YARA rules matched", yaraScanResult.MatchCount)
 			for _, det := range yaraScanResult.Detections {
 				log.Printf("   - %s: %s (severity: %s)", det.RuleName, det.Description, det.Severity)
 			}
@@ -110,11 +109,19 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Warning: Failed to save job to database: %v", err)
 	}
 
+	// Analysis complete - initiate automatic cleanup (ephemeral VM principle)
+	log.Printf("Analysis complete for job %s, initiating automatic cleanup", jobID)
+	if err := CleanupJob(jobID); err != nil {
+		log.Printf("Warning: Automatic cleanup failed for job %s: %v", jobID, err)
+	} else {
+		log.Printf(" Successfully cleaned up ephemeral resources for job %s", jobID)
+	}
+
 	// Return JSON response with job details
 	response := UploadResponse{
 		JobID:  jobID,
 		Hash:   hash,
-		Status: "disk_created",
+		Status: "analyzed_and_cleaned",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
