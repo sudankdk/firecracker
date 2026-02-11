@@ -67,3 +67,10 @@ curl --unix-socket /tmp/firecracker.sock -X PUT \
 
   wsl
 sudo ./firecracker --api-sock /tmp/firecracker.sock
+
+
+
+# **Daily Progress (11 Feb 2026)**
+* Reoworked on the firecracker repo
+* Explored more and more docs
+* Fixing lot of errors 

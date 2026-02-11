@@ -1,6 +1,7 @@
 package sandboxing
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -9,17 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sudankdk/firecracker/internal/domain"
-	client "github.com/sudankdk/firecracker/internal/httpclient"
+	client "github.com/sudankdk/firecracker/internal/httpClient"
 )
-
-
-type VMManager struct {
-	BaseChrootDir string // e.g., "/srv/vms"
-	BaseUploadDir string // e.g., "/srv/uploads"
-	KernelPath    string
-	RootfsPath    string
-}
-
 
 // CreateVMMetadata generates unique IDs, socket path, and TAP name
 func CreateVMMetadata() (*domain.VM, error) {
@@ -35,11 +27,11 @@ func CreateVMMetadata() (*domain.VM, error) {
 }
 
 // CreateTAP creates a host TAP interface
-func CreateTAP(vm *domain.VM) error {
-	if err := exec.Command("ip", "tuntap", "add", vm.TapName, "mode", "tap").Run(); err != nil {
+func CreateTAP(tapName string) error {
+	if err := exec.Command("ip", "tuntap", "add", tapName, "mode", "tap").Run(); err != nil {
 		return err
 	}
-	if err := exec.Command("ip", "link", "set", vm.TapName, "up").Run(); err != nil {
+	if err := exec.Command("ip", "link", "set", tapName, "up").Run(); err != nil {
 		return err
 	}
 	return nil
@@ -71,70 +63,61 @@ func RunFirecracker(vm *domain.VM) error {
 	return nil
 }
 
-// StartVM configures VM via Firecracker API
-func StartVM(vm *domain.VM, kernel, rootfs, inputDrive string) error {
-	client := client.NewClient(vm.APISock)
+func configureVM(vm *domain.VM, kernel, rootfs, inputDrive string) error {
+	httpClient := client.NewClient(vm.APISock)
 
-	// Generate random MAC
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	r1 := rng.Intn(256)
-	r2 := rng.Intn(256)
-	r3 := rng.Intn(256)
-	r4 := rng.Intn(256)
-	mac := fmt.Sprintf("AA:FC:%02X:%02X:%02X:%02X", r1, r2, r3, r4)
+	// Random MAC for eth0
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	mac := fmt.Sprintf("AA:FC:%02X:%02X:%02X:%02X", r.Intn(256), r.Intn(256), r.Intn(256), r.Intn(256))
 
-	// Attach network
-	if err := client.Put("/network-interfaces/eth0", []byte(fmt.Sprintf(`{
+	// Network interface
+	if err := client.Put(httpClient, "/network-interfaces/eth0", []byte(fmt.Sprintf(`{
 		"iface_id": "eth0",
 		"host_dev_name": "%s",
 		"guest_mac": "%s"
 	}`, vm.TapName, mac))); err != nil {
-		return fmt.Errorf("failed to attach network interface: %w", err)
+		return errors.New("failed to attach network interface")
 	}
 
 	// Machine config
-	if err := client.Put("/machine-config", []byte(`{
+	if err := client.Put(httpClient, "/machine-config", []byte(`{
 		"vcpu_count": 1,
 		"mem_size_mib": 512
 	}`)); err != nil {
-		return fmt.Errorf("failed to do machine config: %w", err)
+		return errors.New("failed to configure machine")
 	}
 
 	// Boot source
-	if err := client.Put("/boot-source", []byte(fmt.Sprintf(`{
+	if err := client.Put(httpClient, "/boot-source", []byte(fmt.Sprintf(`{
 		"kernel_image_path": "%s",
 		"boot_args": "console=ttyS0 reboot=k panic=1 pci=off"
 	}`, kernel))); err != nil {
-		return fmt.Errorf("failed to booot source: %w", err)
+		return errors.New("failed to configure boot source")
 	}
 
 	// Rootfs
-	if err := client.Put("/drives/rootfs", []byte(fmt.Sprintf(`{
+	if err := client.Put(httpClient, "/drives/rootfs", []byte(fmt.Sprintf(`{
 		"drive_id": "rootfs",
 		"path_on_host": "%s",
 		"is_root_device": true,
 		"is_read_only": false
 	}`, rootfs))); err != nil {
-		return fmt.Errorf("failed attach rootfs : %w", err)
+		return errors.New("failed to configure rootfs")
 	}
 
-	// Optional input drive (read-only)
-	if inputDrive != "" {
-		if err := client.Put("/drives/input_drive", []byte(fmt.Sprintf(`{
-			"drive_id": "input_drive",
-			"path_on_host": "%s",
-			"is_root_device": false,
-			"is_read_only": true
-		}`, inputDrive))); err != nil {
-			return fmt.Errorf("failed to attach input drive: %w", err)
-		}
+	// Input drive (uploaded file)
+	if err := client.Put(httpClient, "/drives/input_drive", []byte(fmt.Sprintf(`{
+		"drive_id": "input_drive",
+		"path_on_host": "%s",
+		"is_root_device": false,
+		"is_read_only": true
+	}`, inputDrive))); err != nil {
+		return errors.New("failed to configure input drive")
 	}
 
 	// Start instance
-	if err := client.Put("/actions", []byte(`{
-		"action_type": "InstanceStart"
-	}`)); err != nil {
-		return fmt.Errorf("failed to start instance: %w", err.(error))
+	if err := client.Put(httpClient, "/actions", []byte(`{"action_type":"InstanceStart"}`)); err != nil {
+		return errors.New("failed to start instance")
 	}
 	return nil
 }

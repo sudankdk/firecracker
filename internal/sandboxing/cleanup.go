@@ -10,10 +10,10 @@ import (
 // StopVM sends shutdown signal to Firecracker VM
 func StopVM(jobID string) error {
 	sock := fmt.Sprintf("/tmp/firecracker-%s.sock", jobID)
-	client := client.NewClient(sock)
+	httpClient := client.NewClient(sock)
 
 	// Send InstanceShutdown action
-	if err := client.Put("/actions", []byte(`{
+	if err := client.Put(httpClient, "/actions", []byte(`{
 		"action_type": "SendCtrlAltDel"
 	}`)); err != nil {
 		return fmt.Errorf("failed to send shutdown signal: %w", err)
