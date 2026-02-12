@@ -6,15 +6,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/sudankdk/firecracker/internal/domain"
 )
 
 type VMManager struct {
-	BaseChrootDir string // e.g., "/srv/vms"
-	BaseUploadDir string // e.g., "/srv/uploads"
-	KernelPath    string
-	RootfsPath    string
+	BaseChrootDir   string // e.g., "/srv/vms"
+	BaseUploadDir   string // e.g., "/srv/uploads"
+	KernelPath      string
+	RootfsPath      string
+	JailerPath      string
+	FirecrackerPath string
 }
 
 func (mgr *VMManager) SpawnVM(uploadFilePath string) (*domain.VM, error) {
@@ -22,36 +25,50 @@ func (mgr *VMManager) SpawnVM(uploadFilePath string) (*domain.VM, error) {
 	if err != nil {
 		return nil, err
 	}
-	chrootDir := filepath.Join(mgr.BaseChrootDir, vm.ID)
-	if err := os.MkdirAll(chrootDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create chroot: %w", err)
+	vmDir := filepath.Join(mgr.BaseChrootDir, vm.ID)
+	if err := os.MkdirAll(vmDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create VM directory: %w", err)
 	}
 
-	inputDrive := filepath.Join(chrootDir, "input_drive.img")
+	inputDrive := filepath.Join(vmDir, "input_drive.img")
 	if err := copyFile(uploadFilePath, inputDrive); err != nil {
 		return nil, fmt.Errorf("failed to copy upload: %w", err)
 	}
 
-	if err := CreateTAP(vm.TapName); err != nil {
-		return nil, fmt.Errorf("failed to create TAP: %w", err)
+	kernelPath := filepath.Join(vmDir, "kernel")
+	if err := copyFile(mgr.KernelPath, kernelPath); err != nil {
+		return nil, fmt.Errorf("failed to copy kernel: %w", err)
 	}
 
-	cmd, err := mgr.SetUpJailer(vm)
+	rootfsPath := filepath.Join(vmDir, "rootfs.ext4")
+	if err := copyFile(mgr.RootfsPath, rootfsPath); err != nil {
+		return nil, fmt.Errorf("failed to copy rootfs: %w", err)
+	}
+
+	// TAP and networking disabled for manual isolation in WSL
+	// if err := CreateTAP(vm.TapName); err != nil {
+	// 	return nil, fmt.Errorf("failed to create TAP: %w", err)
+	// }
+
+	vm.APISock = filepath.Join(vmDir, "firecracker.socket")
+
+	cmd, err := mgr.SetUpFirecracker(vm)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set up jailer: %w", err)
+		return nil, fmt.Errorf("failed to set up Firecracker: %w", err)
 	}
 	vm.Cmd = cmd
+	if err := waitForSocket(vm.APISock, 5*time.Second); err != nil {
+		return nil, err
+	}
 
-	if err := configureVM(vm, mgr.KernelPath, mgr.RootfsPath, inputDrive); err != nil {
+	if err := configureVM(vm, kernelPath, rootfsPath, inputDrive); err != nil {
 		return nil, fmt.Errorf("failed to configure VM: %w", err)
 	}
 
-	// Step 7: Cleanup after VM exits
+	// Cleanup after VM exits
 	go func() {
 		cmd.Wait()
-		_ = exec.Command("ip", "link", "del", vm.TapName).Run()
-		os.Remove(vm.APISock)
-		os.RemoveAll(chrootDir)
+		os.RemoveAll(vmDir)
 	}()
 
 	return vm, nil
@@ -78,16 +95,27 @@ func copyFile(src, dst string) error {
 	return out.Sync()
 }
 
-func (mgr *VMManager) SetUpJailer(vm *domain.VM) (*exec.Cmd, error) {
-	cmd := exec.Command(
-		"./jailer",
-		"--id", vm.ID,
-		"--exec-file", "./firecracker",
-		"--uid", "1000",
-		"--gid", "1000",
-		"--chroot-base-dir", mgr.BaseChrootDir,
-		"--api-sock", vm.APISock,
-	)
+func waitForSocket(socketPath string, timeout time.Duration) error {
+	start := time.Now()
+	for {
+		if _, err := os.Stat(socketPath); err == nil {
+			return nil
+		}
+		if time.Since(start) > timeout {
+			return fmt.Errorf("socket did not appear within %v", timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (mgr *VMManager) SetUpFirecracker(vm *domain.VM) (*exec.Cmd, error) {
+	// Jailer is not supported in WSL, so running Firecracker directly with manual isolation
+	firecrackerPath := mgr.FirecrackerPath
+	if firecrackerPath == "" {
+		firecrackerPath = "./firecracker"
+	}
+
+	cmd := exec.Command(firecrackerPath, "--api-sock", vm.APISock)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

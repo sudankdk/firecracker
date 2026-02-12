@@ -3,10 +3,8 @@ package sandboxing
 import (
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/sudankdk/firecracker/internal/domain"
@@ -67,17 +65,17 @@ func configureVM(vm *domain.VM, kernel, rootfs, inputDrive string) error {
 	httpClient := client.NewClient(vm.APISock)
 
 	// Random MAC for eth0
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	mac := fmt.Sprintf("AA:FC:%02X:%02X:%02X:%02X", r.Intn(256), r.Intn(256), r.Intn(256), r.Intn(256))
+	// r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	// mac := fmt.Sprintf("AA:FC:%02X:%02X:%02X:%02X", r.Intn(256), r.Intn(256), r.Intn(256), r.Intn(256))
 
-	// Network interface
-	if err := client.Put(httpClient, "/network-interfaces/eth0", []byte(fmt.Sprintf(`{
-		"iface_id": "eth0",
-		"host_dev_name": "%s",
-		"guest_mac": "%s"
-	}`, vm.TapName, mac))); err != nil {
-		return errors.New("failed to attach network interface")
-	}
+	// // Network interface
+	// if err := client.Put(httpClient, "/network-interfaces/eth0", []byte(fmt.Sprintf(`{
+	// 	"iface_id": "eth0",
+	// 	"host_dev_name": "%s",
+	// 	"guest_mac": "%s"
+	// }`, vm.TapName, mac))); err != nil {
+	// 	return errors.New("failed to attach network interface")
+	// }
 
 	// Machine config
 	if err := client.Put(httpClient, "/machine-config", []byte(`{
@@ -90,17 +88,17 @@ func configureVM(vm *domain.VM, kernel, rootfs, inputDrive string) error {
 	// Boot source
 	if err := client.Put(httpClient, "/boot-source", []byte(fmt.Sprintf(`{
 		"kernel_image_path": "%s",
-		"boot_args": "console=ttyS0 reboot=k panic=1 pci=off"
+		"boot_args": "console=ttyS0 reboot=k panic=1 pci=off ip=off"
 	}`, kernel))); err != nil {
 		return errors.New("failed to configure boot source")
 	}
 
-	// Rootfs
+	// Rootfs (read-only for isolation)
 	if err := client.Put(httpClient, "/drives/rootfs", []byte(fmt.Sprintf(`{
 		"drive_id": "rootfs",
 		"path_on_host": "%s",
 		"is_root_device": true,
-		"is_read_only": false
+		"is_read_only": true
 	}`, rootfs))); err != nil {
 		return errors.New("failed to configure rootfs")
 	}

@@ -220,19 +220,27 @@ func main() {
 	// 	json.NewEncoder(w).Encode(stats)
 	// })
 
-	if err := os.MkdirAll("/srv/uploads", 0755); err != nil {
+	if err := os.MkdirAll("/tmp/uploads", 0755); err != nil {
 		log.Fatal(err)
 	}
 
-	if err := os.MkdirAll("/srv/vms", 0755); err != nil {
+	if err := os.MkdirAll("/tmp/vms", 0755); err != nil {
 		log.Fatal(err)
 	}
 
 	vmManager := &sandboxing.VMManager{
-		BaseChrootDir: "/srv/vms",
-		BaseUploadDir: "/srv/uploads",
-		KernelPath:    "/srv/kernel/vmlinux",
-		RootfsPath:    "/srv/rootfs/rootfs.ext4",
+		BaseChrootDir:   "/tmp/vms",
+		BaseUploadDir:   "/tmp/uploads",
+		KernelPath:      "/mnt/d/firecracker/hello-vmlinux.bin",
+		RootfsPath:      "/mnt/d/firecracker/hello-rootfs.ext4",
+		JailerPath:      "/mnt/d/firecracker/release-v1.7.0-x86_64/jailer-v1.7.0-x86_64",
+		FirecrackerPath: "/mnt/d/firecracker/release-v1.7.0-x86_64/firecracker-v1.7.0-x86_64",
+		// BaseChrootDir:   "/srv/vms",
+		// BaseUploadDir:   "/srv/uploads",
+		// KernelPath:      "/mnt/d/firecracker/hello-vmlinux.bin",
+		// RootfsPath:      "/mnt/d/firecracker/hello-rootfs.ext4",
+		// JailerPath:      "/opt/firecracker/jailer",
+		// FirecrackerPath: "/opt/firecracker/firecracker",
 	}
 
 	uploadHandler := &handler.UploadHandler{
